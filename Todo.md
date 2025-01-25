@@ -16,16 +16,14 @@ resend logic for timeout
 
 ## Client
 receive file✅
-ack from client
-how to link file parts based on sequence number
+append file first to check✅
+ack from client✅
+link file parts based on sequence number
+(only stop-and-wait)✅
 
-append file first to check
+
 
 buffer setting for both
-
-
-
-
 
 
 
@@ -35,11 +33,42 @@ netstat -an | grep 127.0.0
 
 
 # Notes
-use delimeter
-
-
-1.050000 CHUNK MAX
+use delimeter✅
+1.050000 CHUNK MAX✅
 
 not encode for sequence and checksum yet for debugging
 handle file already exists
 - use go back N
+
+
+
+
+# Bug
+ảnh ko nhận full, chỉ nhận 1 phần (do chưa cài ACK và thứ tự)
+
+
+
+# idea
+first pkt contain:
+filename
+number of pkt
+
+
+
+client only write consecutive sequence
+
+must send pkt0 successfully
+
+client send ack = 0 first
+
+WRITE file if consecutive and shrink buffer
+
+handle ack timeout in distinc function, the send function just based on returned ack
+
+concurrency????
+
+
+2461
+
+# Progress
+can send 3kb file

@@ -41,42 +41,83 @@ def create_pkt(file_name,seq_num, buffer_size = 1024):
         # print(f"sending chunk : {chunk}")
         result = header + chunk
         return result
-    
-    
-def sendFile(server, address,file_name):
+
+def create_pkt0(file_name):
     seq_max = chunk_num(file_name)
-    for seq_num in range(seq_max):
-        chunk = create_pkt(file_name,seq_num)
-        # print("size of chunk = ", len(chunk)) 
-        server.sendto(chunk, address)
+    metadata = f"{seq_max}|{file_name}"
+    check_sum = compute_checksum(metadata.encode())
+    pkt0 = f"0|{check_sum}||{metadata}".encode()
+    print (f"Sending metadata: {metadata}")
+    
+    return pkt0
+
+def rcv_req(server):
+    while True:
+        try:
+            data, address = server.recvfrom(BUFFER_SIZE)
+            file_name = data.decode()
+            server.sendto(f"ACK for {file_name}".encode(), address)
+            return file_name, address
+        except socket.timeout:
+            continue
+
+def handle_ack(server, address,file_name ,curr_seq):
+    while True:
+        try:
+            data, _ = server.recvfrom(BUFFER_SIZE)
+            seq_num = int(data.decode())
+            #resend metadata
+            if seq_num == 0:
+                pkt0 = create_pkt0(file_name)
+                server.sendto(pkt0, address)
+                continue
+            if seq_num == curr_seq + 1:
+                print(f"Received ACK for seq_num {curr_seq}")
+                return curr_seq + 1
+            else:
+                return curr_seq
+        except socket.timeout:
+            print("Timeout")
+            return curr_seq
+    
+
+
+def sendFile(server,file_name, address):
+    seq_num = 0
+    curr_seq = 0
+    seq_max = chunk_num(file_name)
+    while True:
+        seq_num = handle_ack(server, address,file_name, seq_num)
+        if (seq_num == curr_seq):
+            print(f"Resending seq_num: {seq_num}")
+        else:
+            curr_seq = seq_num
+        print(f"new seq_num: {curr_seq}")
+        if seq_num == seq_max:
+            break
+        pkt = create_pkt(file_name,seq_num)
+        server.sendto(pkt, address)
+    
+    
     return 1
     
 # Port to listen on (non-privileged ports are > 1023)
 # 0 to 65,535
 LISTEN_PORT  = int(os.getenv('LISTEN_PORT'))
 HOST_IP = os.getenv('HOST_IP')
+
 BUFFER_SIZE = 1024
 # Create a socket using IPv4 and UDP
+RESEND_TIMEOUT = 2  # Timeout in seconds
 server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 server.bind((HOST_IP, LISTEN_PORT)) 
+server.settimeout(RESEND_TIMEOUT)
 
 print(f"Server is running on {HOST_IP}:{LISTEN_PORT}")
 
-# Listen for incoming messages
-while True:
-    data, address = server.recvfrom(BUFFER_SIZE)  # Buffer size is 1024 bytes
-    data = data.decode()
-    print(f"Received message: {data} from {address}")
-    if data == "exit":
-        break
-    elif data == "start":
-        print("Start sending file")
-        
-        if(sendFile(server, address, "2MB.png")):
-            server.sendto(b"END", address)
-            print("File sent")
-        else:
-            print("Error")
-        
-    
 
+file_name, address = rcv_req(server)
+print(f"Received request for file: {file_name}")
+sendFile(server, file_name, address)
+
+print("File sent successfully")
