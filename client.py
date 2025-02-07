@@ -152,7 +152,8 @@ client.connect(("127.0.0.1",2000))
 
 # Open a file for writing
 # file_name = "hello.txt"
-file_name = "2MB.png"
+# file_name = "2MB.png"
+file_name = "10MB.pdf"
 
 if(send_fname(client,file_name)):
     receive_file(client)
