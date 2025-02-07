@@ -70,5 +70,12 @@ concurrency????
 
 2461
 
+pkt0 sending metadata (filename, number of pkt)
+client send ack = 0 first
+then client send ack = 1 and server start sending file
+
+delete file if exists✅
+
+
 # Progress
 can send 3kb file

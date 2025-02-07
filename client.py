@@ -53,7 +53,6 @@ def process_metadata(metadata):
     metadata = metadata.decode()
     seq_max, file_name = metadata.split("|")
     seq_max = int(seq_max)
-    print(f"Receiving metadata: {metadata}")
     return seq_max, file_name
     
 def send_ack(client,seq_num):
@@ -79,22 +78,14 @@ def handle_pkt0(client):
                 send_ack(client,1)
                 return seq_max, file_name  
         except socket.timeout:
-            print("Timeout")
+            print("Timeout for pkt0")
 
-def handle_pkt(client):
-    while True:
-        try:
-            data, addr = client.recvfrom(BUFFER_SIZE)
-            seq_num, chunk = process_pkt(data)
-            if (seq_num == None or chunk == None):
-                return seq_num, chunk, False
-            else:
-                return seq_num +1 , chunk, True
-        except socket.timeout:
-            print("Timeout")
-            return None, None, False
+
 
 def send_fname(client, file_name):
+    #delete file if exist
+    if (os.path.exists(f"clientFile/{file_name}")):
+        os.remove(f"clientFile/{file_name}")
     while True:
         try:
             pkt0 = f"{file_name}".encode()
@@ -107,7 +98,19 @@ def send_fname(client, file_name):
             print("Timeout for first pkt")
     
 
-
+def handle_pkt(client):
+    while True:
+        try:
+            data, addr = client.recvfrom(BUFFER_SIZE)
+            seq_num, chunk = process_pkt(data)
+            print(f"Receiving seq_num: {seq_num}")
+            if (seq_num == None or chunk == None):
+                return seq_num, chunk, False
+            else:
+                return seq_num +1 , chunk, True
+        except socket.timeout:
+            print("Timeout for pkt")
+            return None, None, False
 def receive_file(client):
     # print("Receiving file-----------------")
     FLAG1 = True
@@ -126,9 +129,12 @@ def receive_file(client):
             # buffer_arr[seq_num] = True
             append_file(f"clientFile/{file_name}",chunk)
         if (seq_num == seq_max +1 ):
-            FLAG1 = False
+            print("enough pkt, stop")
+            send_ack(client, seq_num) #send max seq_num + 1 to stop server
+            # FLAG1 = False
+            return
+        print(f"sent ack for seq_num {seq_num}")
         send_ack(client, seq_num)
-    print(f"success")
     
     return
     
@@ -145,10 +151,11 @@ client.settimeout(RESEND_TIMEOUT)
 client.connect(("127.0.0.1",2000))
 
 # Open a file for writing
-output_file = "clientFile/output.png"
+# file_name = "hello.txt"
+file_name = "2MB.png"
 
-if(send_fname(client,"hello.txt")):
+if(send_fname(client,file_name)):
     receive_file(client)
 
 
-print(f"File saved as {output_file}")
+print(f"File saved as {file_name}")

@@ -33,8 +33,10 @@ def chunk_num(file_name, buffer_size = 1024):
     return chunks_num
     
 def create_pkt(file_name,seq_num, buffer_size = 1024):
+    print(f"Reading chunk {seq_num}")
+    reading_index = buffer_size * (seq_num - 1) 
     with open(file_name, "rb") as f:
-        f.seek(buffer_size * seq_num)
+        f.seek(reading_index)
         chunk = f.read(buffer_size)
         check_sum = compute_checksum(chunk)  
         header = f"{seq_num}|{check_sum}||".encode()
@@ -59,6 +61,7 @@ def rcv_req(server):
             server.sendto(f"ACK for {file_name}".encode(), address)
             return file_name, address
         except socket.timeout:
+            print("Waiting for request ...")
             continue
 
 def handle_ack(server, address,file_name ,curr_seq):
@@ -72,7 +75,7 @@ def handle_ack(server, address,file_name ,curr_seq):
                 server.sendto(pkt0, address)
                 continue
             if seq_num == curr_seq + 1:
-                print(f"Received ACK for seq_num {curr_seq}")
+                print(f"Received ACK for seq_num {seq_num}")
                 return curr_seq + 1
             else:
                 return curr_seq
@@ -92,8 +95,9 @@ def sendFile(server,file_name, address):
             print(f"Resending seq_num: {seq_num}")
         else:
             curr_seq = seq_num
-        print(f"new seq_num: {curr_seq}")
-        if seq_num == seq_max:
+        print(f"new seq_num sent: {curr_seq}")
+        if seq_num == seq_max +1 :
+            print("All the chunks are sent")
             break
         pkt = create_pkt(file_name,seq_num)
         server.sendto(pkt, address)
