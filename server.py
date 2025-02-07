@@ -23,19 +23,19 @@ def compute_checksum(chunk: bytes) -> str:
     check_sum = sha256_hash.hexdigest()
     # print(check_sum)
     return check_sum
-def chunk_num(file_name, buffer_size = 1024):
+def chunk_num(file_path, buffer_size = 1024):
 # File size in bytes
-    file_size = os.path.getsize(file_name)  
+    file_size = os.path.getsize(file_path)  
     temp = file_size // buffer_size
     print(f"File size: {temp} K bytes")
     chunks_num = file_size // buffer_size + 1
     print(f"Number of chunks: {chunks_num}")
     return chunks_num
     
-def create_pkt(file_name,seq_num, buffer_size = 1024):
+def create_pkt(file_path,seq_num, buffer_size = 1024):
     print(f"Reading chunk {seq_num}")
     reading_index = buffer_size * (seq_num - 1) 
-    with open(file_name, "rb") as f:
+    with open(file_path, "rb") as f:
         f.seek(reading_index)
         chunk = f.read(buffer_size)
         check_sum = compute_checksum(chunk)  
@@ -44,8 +44,9 @@ def create_pkt(file_name,seq_num, buffer_size = 1024):
         result = header + chunk
         return result
 
-def create_pkt0(file_name):
-    seq_max = chunk_num(file_name)
+def create_pkt0(file_path):
+    file_name = file_path.split("/")[-1]
+    seq_max = chunk_num(file_path)
     metadata = f"{seq_max}|{file_name}"
     check_sum = compute_checksum(metadata.encode())
     pkt0 = f"0|{check_sum}||{metadata}".encode()
@@ -85,12 +86,12 @@ def handle_ack(server, address,file_name ,curr_seq):
     
 
 
-def sendFile(server,file_name, address):
+def sendFile(server,file_path, address):
     seq_num = 0
     curr_seq = 0
-    seq_max = chunk_num(file_name)
+    seq_max = chunk_num(file_path)
     while True:
-        seq_num = handle_ack(server, address,file_name, seq_num)
+        seq_num = handle_ack(server, address,file_path, seq_num)
         if (seq_num == curr_seq):
             print(f"Resending seq_num: {seq_num}")
         else:
@@ -99,7 +100,7 @@ def sendFile(server,file_name, address):
         if seq_num == seq_max +1 :
             print("All the chunks are sent")
             break
-        pkt = create_pkt(file_name,seq_num)
+        pkt = create_pkt(file_path,seq_num)
         server.sendto(pkt, address)
     
     
@@ -122,6 +123,7 @@ print(f"Server is running on {HOST_IP}:{LISTEN_PORT}")
 
 file_name, address = rcv_req(server)
 print(f"Received request for file: {file_name}")
-sendFile(server, file_name, address)
+file_path = f"serverFiles/{file_name}"
+sendFile(server, file_path, address)
 
 print("File sent successfully")

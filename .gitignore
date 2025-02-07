@@ -1,3 +1,5 @@
 .env
 
 myStuff/
+serverFiles/
+clientFiles/

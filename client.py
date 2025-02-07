@@ -127,7 +127,7 @@ def receive_file(client):
             continue
         else:
             # buffer_arr[seq_num] = True
-            append_file(f"clientFile/{file_name}",chunk)
+            append_file(f"clientFiles/{file_name}",chunk)
         if (seq_num == seq_max +1 ):
             print("enough pkt, stop")
             send_ack(client, seq_num) #send max seq_num + 1 to stop server
