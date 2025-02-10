@@ -1,6 +1,9 @@
 import socket
 import hashlib
 import os
+import threading
+import time
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -137,8 +140,42 @@ def receive_file(client):
         send_ack(client, seq_num)
     
     return
-    
 
+INPUT_FILE = "input.txt" 
+processed_files = set()
+file_queue = [] 
+
+def debug_log(message):
+    print(f"[DEBUG] {time.strftime('%H:%M:%S')} - {message}")
+
+def read_new_files():
+    debug_log("Scanning input.txt...")
+    
+    if not os.path.exists(INPUT_FILE):
+        open(INPUT_FILE, "w").close()  
+        return []
+
+    with open(INPUT_FILE, "r") as f:
+        all_files = {line.strip() for line in f if line.strip()}  
+
+    # Filter out processed files
+    new_files = list(all_files - processed_files)
+
+    if new_files:
+        debug_log(f"New file: {new_files}")
+
+    return new_files
+
+
+def scanFile():
+    while True:
+        debug_log("🔄 check file input.txt...")
+        new_files = read_new_files()
+        if new_files:
+            file_queue.extend(new_files)  
+            processed_files.update(new_files) 
+            debug_log(f"Queue: {file_queue}")
+        time.sleep(5)  
 
 
 # HOST_ADD =   # The server's hostname or IP address
@@ -153,10 +190,34 @@ client.connect(("127.0.0.1",2000))
 # Open a file for writing
 # file_name = "hello.txt"
 # file_name = "2MB.png"
-file_name = "10MB.pdf"
+# file_name = "10MB.pdf"
 
-if(send_fname(client,file_name)):
-    receive_file(client)
+# if(send_fname(client,file_name)):
+#     receive_file(client)
 
 
-print(f"File saved as {file_name}")
+# print(f"File saved as {file_name}")
+
+def request_file_list(client):
+    try:
+        client.sendto("LIST".encode(), SERVER_ADD) 
+        data, addr = client.recvfrom(BUFFER_SIZE)  
+        file_list = data.decode().split("\n")  
+        print("\nAvailable Files:")
+        for file in file_list:
+            print(f" - {file}")
+        return file_list
+    except socket.timeout:
+        print("Timeout")
+        return []
+
+
+
+#  Request file list from server
+file_list = request_file_list(client)
+
+
+# Scan file every 5 seconds
+read_new_files()
+scanner_thread = threading.Thread(target=scanFile, daemon=True)
+scanner_thread.start()

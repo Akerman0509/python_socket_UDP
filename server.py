@@ -7,6 +7,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+FILE_LIST_PATH = "allowFile.txt"
+
+def load_file_list():
+    files = {}
+    if not os.path.exists(FILE_LIST_PATH):
+        print("File list not found!")
+        return files
+
+    with open(FILE_LIST_PATH, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                files[parts[0]] = parts[1]  
+    return files
+
 def compute_checksum(chunk: bytes) -> str:
     """
     Compute the SHA-256 checksum of a data chunk.
@@ -59,6 +74,12 @@ def rcv_req(server):
         try:
             data, address = server.recvfrom(BUFFER_SIZE)
             file_name = data.decode()
+            # Request list of files
+            if file_name == "LIST":
+                file_list = "\n".join([f"{name} {size}" for name, size in FILES.items()])
+                server.sendto(file_list.encode(), address)
+                return None, address
+            
             server.sendto(f"ACK for {file_name}".encode(), address)
             return file_name, address
         except socket.timeout:
@@ -110,6 +131,7 @@ def sendFile(server,file_path, address):
 # 0 to 65,535
 LISTEN_PORT  = int(os.getenv('LISTEN_PORT'))
 HOST_IP = os.getenv('HOST_IP')
+FILES = load_file_list()
 
 BUFFER_SIZE = 1024
 # Create a socket using IPv4 and UDP
@@ -121,9 +143,14 @@ server.settimeout(RESEND_TIMEOUT)
 print(f"Server is running on {HOST_IP}:{LISTEN_PORT}")
 
 
-file_name, address = rcv_req(server)
-print(f"Received request for file: {file_name}")
-file_path = f"serverFiles/{file_name}"
-sendFile(server, file_path, address)
+# file_name, address = rcv_req(server)
+# print(f"Received request for file: {file_name}")
+# file_path = f"serverFiles/{file_name}"
+# sendFile(server, file_path, address)
 
-print("File sent successfully")
+# print("File sent successfully")
+
+file_name, address = rcv_req(server)
+
+if file_name is None:
+    print("Sent file list to client.")
