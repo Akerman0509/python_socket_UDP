@@ -169,7 +169,7 @@ def read_new_files():
 
 def scanFile():
     while True:
-        debug_log("🔄 check file input.txt...")
+        debug_log("check file input.txt...")
         new_files = read_new_files()
         if new_files:
             file_queue.extend(new_files)  
@@ -180,12 +180,7 @@ def scanFile():
 
 # HOST_ADD =   # The server's hostname or IP address
 # PORT = 3000  # The port used by the server
-SERVER_ADD = (os.getenv('HOST_IP'), int(os.getenv('LISTEN_PORT')))
-BUFFER_SIZE = 1200
-RESEND_TIMEOUT = 2  # Timeout in seconds
-client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-client.settimeout(RESEND_TIMEOUT)
-client.connect(("127.0.0.1",2000))
+
 
 # Open a file for writing
 # file_name = "hello.txt"
@@ -197,6 +192,12 @@ client.connect(("127.0.0.1",2000))
 
 
 # print(f"File saved as {file_name}")
+SERVER_ADD = (os.getenv('HOST_IP'), int(os.getenv('LISTEN_PORT')))
+BUFFER_SIZE = 1200
+RESEND_TIMEOUT = 2  # Timeout in seconds
+client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+client.settimeout(RESEND_TIMEOUT)
+client.connect(("127.0.0.1",2000))
 
 def request_file_list(client):
     try:
@@ -213,11 +214,38 @@ def request_file_list(client):
 
 
 
-#  Request file list from server
-file_list = request_file_list(client)
+
 
 
 # Scan file every 5 seconds
 read_new_files()
 scanner_thread = threading.Thread(target=scanFile, daemon=True)
 scanner_thread.start()
+
+def main():
+
+   
+    global running
+    running = True
+    scanner_thread = threading.Thread(target=scanFile, daemon=True)
+    scanner_thread.start()
+    
+    #  Request file list from server
+    file_list = request_file_list(client)
+    try:
+        while running:
+            if file_queue:
+                file_name = file_queue.pop(0)
+                debug_log(f"Take file from queue: {file_name}")
+                #Download file
+                debug_log(f"Queue after download : {file_queue}")
+            else:
+                debug_log("No file in queue...")
+                time.sleep(1)
+    except KeyboardInterrupt:
+        running = False  
+        time.sleep(1)
+        debug_log("Exit!")
+
+if __name__ == "__main__":
+    main()
