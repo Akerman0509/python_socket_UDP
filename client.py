@@ -1,6 +1,8 @@
 import socket
 import hashlib
 import os
+import threading
+import ast
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,15 +25,23 @@ def missing_pkt(data_buffer):
         return index
     return -1
 
-def newest_pkt(data_buffer):
+# newest received pkt index
+def newest_pkt(start, arr_base, data_buffer):
     for i in range(len(data_buffer)):
         if data_buffer[i] == None:
-            return i - 1
+            index  = i + arr_base + start - 1
+            return index
     return -1
 
-def convert_index(seq_num, arr_base, buffer_max):
-    index  = (seq_num - arr_base) % buffer_max
+def index_to_seq(start, index, arr_base):
+    seq_num = index + arr_base + start
+    return seq_num
+def seq_to_index(start, seq_num, arr_base, buffer_max):
+    index  = (seq_num - arr_base - start) % buffer_max
     return index
+def count_consec(start, seq_num, arr_base):
+    tmp  = seq_num - arr_base - start + 1
+    return tmp
 def adjust_buffer(data_buffer, wnd_max, buffer_max):    
     # bool_buffer = bool_buffer[10:]
     data_buffer = data_buffer[wnd_max:]
@@ -55,7 +65,7 @@ def validate_checksum(chunk: str, received_checksum: str) -> bool:
     print ("Checksum not matched")
     return False
 
-def handle_pkt0(client):
+def handle_pkt0(client, server_addr):
     print("handle_pkt0")
     seq_max = 0
     seq_num = -1
@@ -66,19 +76,16 @@ def handle_pkt0(client):
             seq_num, chunk = process_pkt(data)
 
             if (seq_num == 0):
-                seq_max, file_name = process_metadata(chunk)
-                print(f"Receiving metadata: {seq_max} and {file_name}")
-                send_ack(client,0)
-                return seq_max, file_name  
+                seq_max, file_name, data_ranges = process_metadata(chunk)
+                print(f"Receiving metadata: {seq_max} and {file_name} and {data_ranges}")
+                send_ack(client,0, server_addr)
+                return seq_max, file_name ,data_ranges
         except socket.timeout:
-            send_Nack(client, 0)
+            send_Nack(client, 0, server_addr)
             print("Timeout for pkt0")
-            
-def append_file(file_name, chunk):
-    with open(file_name,"ab") as f:
-        f.write(chunk)
+
         
-def append_file2(file_name, data_buffer, wnd_max):
+def append_file(file_name, data_buffer,start, arr_base,  wnd_max):
     print("$$ write to file")
     file_path = f"clientFiles/{file_name}"
     data = data_buffer[:wnd_max]
@@ -87,9 +94,8 @@ def append_file2(file_name, data_buffer, wnd_max):
     # print (f"len data = {len(data)}")
     with open(file_path,"ab") as f:
         for i in range(len(data)):
-            print (f"writing chunk {i}")
-            if data[i] == "dummy":
-                continue
+            print (f"writing chunk {i + arr_base + start} to file")
+            # print(f"data[i]: {data[i]}")
             f.write(data[i])
         
 def process_pkt(data):
@@ -109,162 +115,184 @@ def process_pkt(data):
     if(not validate_checksum(chunk,check_sum)):
         # add resend logic
         return None, None
-    # append_file("clientFile/output.png",chunk)
-    # print(f"Receiving seq_num: {seq_num}")
-    # print(f"recieve chunk : {chunk}")
-    # ADD ACK logic
+
     return seq_num, chunk
 
 def process_metadata(metadata):
     metadata = metadata.decode()
-    seq_max, file_name = metadata.split("|")
+    # print(f"metadata: {metadata}")
+    seq_max, file_name, data_ranges = metadata.split("|")
     seq_max = int(seq_max)
-    return seq_max, file_name
+    return seq_max, file_name, data_ranges
     
-def send_ack(client,seq_num):
+def send_ack(client,seq_num, server_addr):
     msg = f"ACK:{seq_num}"
     ack = f"{msg}".encode()
-    client.sendto(ack, SERVER_ADD)
+    client.sendto(ack, server_addr)
     return
 
-def send_Nack(client,seq_num):
+def send_Nack(client,seq_num, server_addr):
     msg = f"nACK:{seq_num}"
     ack = f"{msg}".encode()
-    client.sendto(ack, SERVER_ADD)
+    client.sendto(ack, server_addr)
     return
 
 
 
-def send_fname(client, file_name):
+def send_fname(client, file_name, server_addr):
     #delete file if exist
     if (os.path.exists(f"clientFiles/{file_name}")):
         os.remove(f"clientFiles/{file_name}")
     while True:
         try:
             pkt0 = f"file_name:{file_name}".encode()
-            client.sendto(pkt0, SERVER_ADD)
+            client.sendto(pkt0, server_addr)
             # data, addr = client.recvfrom(BUFFER_SIZE)
             # if (data.decode() == f"ACK for {file_name}"):
             #     print(f"received ACK for {file_name}")
-            seq_max, file_name= handle_pkt0(client)
+            seq_max, file_name,data_ranges = handle_pkt0(client, server_addr)
             
-            return seq_max, file_name
+            return seq_max, file_name, data_ranges
         except socket.timeout:
             print("Timeout for first pkt")
     
 
-def receive_file(client, file_name ):
-    seq_max, file_name2 = send_fname(client, file_name)
-    wnd_max = min(seq_max+1, 40)  #change here for speed
+def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part_index):
+
+    start, end = start_end
     buffer_max = wnd_max + 10
     data_buffer = [None] * buffer_max
-    data_buffer[0] = "dummy"
+    # data_buffer[0] = "dummy"          #no metadata, receive from index 0
     arr_base = 0
     
-    req_seq = 1 # dummy
-    curr_seq = 1
-    
-    
+    req_seq = start # dummy
+    curr_seq = start
+    socket_data.sendto(f"START:0".encode(), server_addr) # potential loss
     while True:
         try:
-            data, addr = client.recvfrom(BUFFER_SIZE)
+            
+            data, addr = socket_data.recvfrom(BUFFER_SIZE)
             pkt_seq, chunk = process_pkt(data)
             print(f"== Receiving pkt with seq_num: {pkt_seq}")
             if (pkt_seq == None or chunk == None):
                 # nACK for failed pkt
-                send_Nack(client, pkt_seq)
+                send_Nack(socket_data, pkt_seq, server_addr)
             else:
                 # if the pkt seq out of buffer
                 if (pkt_seq >= arr_base + buffer_max ):
                     continue
                 # add to buffer
-                index = convert_index(pkt_seq, arr_base, buffer_max) 
+                index = seq_to_index(start, pkt_seq, arr_base, buffer_max) 
+                print(f"-------index = {index}")
                 data_buffer[index] = chunk
                 # print("data_buffer: ", data_buffer)
                 # find missing pkt with nACK
                 req_seq_index = missing_pkt(data_buffer)
                 if (req_seq_index != -1): # wanting missing pkt index
-                    req_seq = req_seq_index + arr_base
+                    req_seq = index_to_seq(start, req_seq_index, arr_base)
                     print(f"send nACK for pkt {req_seq}")
-                    send_Nack(client, req_seq)
-                    curr_seq = req_seq - 1
+                    send_Nack(socket_data, req_seq, server_addr)
                 else:
-                    req_seq = newest_pkt(data_buffer) + arr_base + 1 # wanting next pkt index
-                    curr_seq = req_seq-1
+                    req_seq = newest_pkt(start, arr_base , data_buffer) + 1
+                curr_seq = req_seq-1
                     
                 if(req_seq < pkt_seq):
                     print(f"++ send nACK <<< for pkt {req_seq}")
-                    send_Nack(client, req_seq)
+                    send_Nack(socket_data, req_seq, server_addr)
                 else:
                     print(f"send ACK for pkt {pkt_seq}")    
-                    send_ack(client, pkt_seq) # success
+                    send_ack(socket_data, pkt_seq, server_addr) # success
                 #if ack cannot reach server ???? resend in timeout
-            
-
 
             # write continuous data to file
             print(f"arr_base: {arr_base}, req_seq: {req_seq}")
-            if req_seq - arr_base >= wnd_max:
-                append_file2(f"{file_name2}", data_buffer, wnd_max)
+            consec_pkt = count_consec(start, curr_seq, arr_base)
+            if consec_pkt >= wnd_max:
+                append_file(f"{file_name}", data_buffer,start , arr_base,  wnd_max)
                 # print("data_buffer: ", data_buffer)
                 data_buffer = adjust_buffer(data_buffer, wnd_max, buffer_max)
                 arr_base += wnd_max
             
             # stop condition
-            if (curr_seq == seq_max):
-                append_file2(f"{file_name2}", data_buffer, curr_seq - arr_base + 1)
-                print("enough pkt, stop")
+            if (curr_seq >= end):
+                append_file(f"{file_name}", data_buffer,start, arr_base,  curr_seq - arr_base)
+                msg = f"FINISH:{part_index}".encode()
+                socket_data.sendto(msg, server_addr)
+                print(f"enough pkt for part {part_index}")
                 return
         except socket.timeout:
-            print(f"Timeout for pkt, send nACK for {curr_seq + 1}") 
-            send_Nack(client, curr_seq + 1)
+            print(f"Timeout for pkt, send nACK for {req_seq}") 
+            send_Nack(client, req_seq, server_addr)
             continue
         
 
-# def receive_file(client):
-#     # print("Receiving file-----------------")
-#     FLAG1 = True
-
-#     seq_num = 0
-#     while FLAG1:
-#         seq_num, chunk, success = handle_pkt(client)
-#         if (success == False):
-#             # not write file
-#             continue
-#         else:
-#             # buffer_arr[seq_num] = True
-#             append_file(f"clientFiles/{file_name}",chunk)
-#         if (seq_num == seq_max +1 ):
-#             print("enough pkt, stop")
-#             send_ack(client, seq_num) #send max seq_num + 1 to stop server
-#             # FLAG1 = False
-#             return
-#         print(f"sent ack for seq_num {seq_num}")
-#         send_ack(client, seq_num)
-#     return
+def send_addr(client, server_addr, data_sockets):
+    while True:
+        try:    
+            for i in range (len(data_sockets)):
+                client.sendto(f"START:{i}".encode(), server_addr)
+            data, _ = client.recvfrom(BUFFER_SIZE)
+            if data.decode() == "Address received":
+                print("Finished sending addresses")
+                return
+        except socket.timeout:
+            print("Timeout for sending addresses")
+            continue
     
-
-
+def receive_file(client, server_addr, data_sockets,  file_name ):
+        
+    seq_max, file_name2, data_ranges_str = send_fname(client, file_name,server_addr )
+    send_addr(client, server_addr, data_sockets)
+    if seq_max and file_name2 and data_ranges_str:
+        print(f"receive: {seq_max} and {file_name2} and {data_ranges_str}")
+    
+    data_ranges = ast.literal_eval(data_ranges_str)
+    # for i in range(len(data_ranges)):
+    #     print(f"part {i} : {data_ranges[i]}, start: {data_ranges[i][0]}, end: {data_ranges[i][1]}")
+    file_path = f"clientFiles/{file_name2}"
+    
+    
+    wnd_max = min(10 , seq_max) # change for speed
+    print(f"wnd_max = {wnd_max}")
+    
+    threading.Thread(target=receive_parts, args=(client, server_addr, file_name2, wnd_max, data_ranges[0], 0)).start()
+        
+    return
 
 # HOST_ADD =   # The server's hostname or IP address
 # PORT = 3000  # The port used by the server
-SERVER_ADD = (os.getenv('HOST_IP'), int(os.getenv('LISTEN_PORT')))
+# SERVER_ADD = (os.getenv('HOST_IP'), int(os.getenv('LISTEN_PORT')))
+MAIN_PORT = 3000
+HOST_IP = "127.0.0.1"
+server_addr = (HOST_IP, MAIN_PORT)  
+
 BUFFER_SIZE = 1200
 RESEND_TIMEOUT = 2  # Timeout in seconds
 client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 client.settimeout(RESEND_TIMEOUT)
-client.connect(("127.0.0.1",2000))
+client.connect(("127.0.0.1",MAIN_PORT))
+
+# Create separate sockets for data transmission
+socket_num = 4
+data_sockets = {} #{index: socket} #start from 0
+for i in range (socket_num):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(RESEND_TIMEOUT)  # Set timeout for retransmissions
+    sock.connect(server_addr)
+    data_sockets[i] = sock
+    print(f"Data socket num {i} bound to {server_addr}")
+
 
 # Open a file for writing
 # file_name = "hello.txt"
-# file_name = "40KB.txt"
+file_name = "40KB.txt"
 # file_name = "2MB.png"
 # file_name = "10MB.pdf"
 # file_name = "200MB_2.pdf"
-file_name = "230MB.mp4"
+# file_name = "230MB.mp4"
 
 
-receive_file(client, file_name) 
+receive_file(client,server_addr,  data_sockets , file_name) 
 
 
 print(f"File saved as {file_name}")
