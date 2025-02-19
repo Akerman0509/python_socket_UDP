@@ -311,20 +311,18 @@ def check_full_address(client_addr):
             return False
     return True
 
-def find_addr(server):
+def find_addr(server, client_addr):
     client_data_addr = [None] * 4
-    address = None
     while True:
         try:
             data, addr = server.recvfrom(BUFFER_SIZE)
-            address = addr #temp
             msg = data.decode()
             flag, num = msg.split(":")
             if flag == "START":
                 client_data_addr[int(num)] = addr
                 print(f"Received START signal from client socket  {num}") # 0, 1, 2, 3
                 if check_full_address(client_data_addr):
-                    server.sendto("Address received".encode(), address) #maybe drop this ??? :((
+                    server.sendto("Address received".encode(), client_addr) #maybe drop this ??? :((
                     return client_data_addr
         except socket.timeout:
             print("Waiting for START signal ...")
@@ -378,9 +376,12 @@ def handle_ack(pkt_seq, n_shift_arr, buffers, file_parts, wnd_max):
     for i in range(n):
         buffer = buffers[i]
         seq_max = file_parts[i][1]
-        if check_ack_in_window(buffer, pkt_seq) and n_shift_arr[i] < wnd_max and n_shift_arr[i] < seq_max - wnd_max:
+        start = file_parts[i][0]
+        if check_ack_in_window(buffer, pkt_seq) and n_shift_arr[i] < wnd_max and n_shift_arr[i] < seq_max - wnd_max - start + 1:
             n_shift_arr[i] += 1
             shift_window(buffer, seq_max)
+            # print(f"buffer {i}: {buffer}")
+            # print(f"n_shift_arr {i}: {n_shift_arr[i]}")
     return
 
 def check_finishing_threads(stop_flags):    
@@ -398,11 +399,12 @@ def sendFile(server):
     
 
     file_name, client_addr, seq_max, file_parts = start_process_func(server)
-    wnd_max = min(10, seq_max)
+    wnd_max = min(20, seq_max)
     buffers = [[] for _ in range (len(file_parts))]
     
     
-    client_data_addr = find_addr(server)
+    client_data_addr = find_addr(server, client_addr)
+    print (f"client_data_addr: {client_data_addr}") 
     print("$$$ Start the process $$$ ")
     
     # Create data sockets
@@ -437,7 +439,7 @@ def sendFile(server):
 
                 elif flag == "nACK":
                     pkt_seq = int(msg[1])
-                    print(f"++ Received NACK for seq_num {pkt_seq}")
+                    print(f"++Received NACK for seq_num {pkt_seq}")
                     # Immediately resend the requested packet.
                     pkt = create_pkt(file_name, pkt_seq)
                     server.sendto(pkt, address)
@@ -460,8 +462,9 @@ def sendFile(server):
         print (f"$$ start sending part {part_index}")
         # Window and state initialization
         start, end = start_end
+        small_end = min(end, start + wnd_max - 1)
         with shared_cv:
-            wnd_buffer.extend([i for i in range(start, start + wnd_max)])
+            wnd_buffer.extend([i for i in range(start, small_end + 1)])
             print(f"wnd_buffer: {wnd_buffer}")
         FLAG1 = True
         # First-time sending of all chunks in the window.
@@ -479,12 +482,12 @@ def sendFile(server):
             with shared_cv:
                 # Wait until n_var is greater than 0 (i.e. receiver signalled a need to send packets)
                 n_var = n_shift_arr[part_index]
-                print(f"n_var = {n_var}")
+                # print(f"n_var = {n_var}")
                 while n_var == 0:
                     shared_cv.wait(timeout=0.01)
                 # Capture the number of packets to send and reset n_var atomically.
                 packets_to_send = n_var
-                n_var = 0
+                n_shift_arr[part_index] = 0
                 # Also capture the latest state for the window and destination.
                 current_buffer = wnd_buffer.copy()
 
@@ -506,7 +509,11 @@ def sendFile(server):
     recv_thread.start()
     #start sending parts
     send_threads = []
-    for i in range(1):
+    
+    num_parts = len(file_parts)
+    for i in range(num_parts):
+    # for k in range(1):
+        # i = 3
         thread = threading.Thread(target=send_file_parts, args=(server, file_name, file_parts[i], i, buffers[i],client_data_addr[i]))
         thread.start()
         send_threads.append(thread)
@@ -515,7 +522,6 @@ def sendFile(server):
         thread.join()
 
     print("==> File sending completed!")
-
 
     
 
