@@ -399,7 +399,7 @@ def sendFile(server):
     
 
     file_name, client_addr, seq_max, file_parts = start_process_func(server)
-    wnd_max = min(20, seq_max)
+    wnd_max = min(30, seq_max)
     buffers = [[] for _ in range (len(file_parts))]
     
     
@@ -522,26 +522,32 @@ def sendFile(server):
         thread.join()
 
     print("==> File sending completed!")
-
-    
-
     return 1
 
+
+def rcv_file_request(server):
+    return
+
+def server_side():
+    HOST_IP = os.getenv('HOST_IP')
+    MAIN_PORT = 3000
+
+    # Create a socket using IPv4 and UDP
+    RESEND_TIMEOUT = 1  # Timeout in seconds
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server.bind((HOST_IP, MAIN_PORT)) 
+    server.settimeout(RESEND_TIMEOUT)
+
+    print(f"Server is running on {HOST_IP}:{MAIN_PORT}")
     
+    
+    sendFile(server)
+    
+    
+BUFFER_SIZE = 1024
+
 # Port to listen on (non-privileged ports are > 1023)
 # 0 to 65,535
-# LISTEN_PORT  = int(os.getenv('LISTEN_PORT'))
-HOST_IP = os.getenv('HOST_IP')
-MAIN_PORT = 3000
-
-BUFFER_SIZE = 1024
-# Create a socket using IPv4 and UDP
-RESEND_TIMEOUT = 1  # Timeout in seconds
-server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-server.bind((HOST_IP, MAIN_PORT)) 
-server.settimeout(RESEND_TIMEOUT)
-
-print(f"Server is running on {HOST_IP}:{MAIN_PORT}")
+server_side()
 
 
-sendFile(server=server)

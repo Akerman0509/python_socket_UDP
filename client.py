@@ -235,7 +235,7 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                 return
         except socket.timeout:
             print(f"Timeout for pkt, send nACK for {req_seq}") 
-            send_Nack(client, req_seq, server_addr)
+            send_Nack(socket_data, req_seq, server_addr)
             continue
         
 
@@ -253,24 +253,21 @@ def send_addr(client, server_addr, data_sockets):
             continue
     
 def receive_file(client, server_addr, data_sockets,  file_name ):
-        
     seq_max, file_name2, data_ranges_str = send_fname(client, file_name,server_addr )
     send_addr(client, server_addr, data_sockets)
     if seq_max and file_name2 and data_ranges_str:
         print(f"receive: {seq_max} and {file_name2} and {data_ranges_str}")
-    
     data_ranges = ast.literal_eval(data_ranges_str)
     # for i in range(len(data_ranges)):
     #     print(f"part {i} : {data_ranges[i]}, start: {data_ranges[i][0]}, end: {data_ranges[i][1]}")
     file_path = f"clientFiles/{file_name2}"
     
     
-    wnd_max = min(20 , seq_max) # change for speed
+    wnd_max = min(30 , seq_max) # change for speed
     print(f"wnd_max = {wnd_max}")
     receive_threads = []
     # threading.Thread(target=receive_parts, args=(client, server_addr, file_name2, wnd_max, data_ranges[0], 0)).start()
     num_parts = len(data_ranges)
-    
     for i in range (num_parts):
     # for k in range (1):
         # i = 3
@@ -285,44 +282,58 @@ def receive_file(client, server_addr, data_sockets,  file_name ):
     merge_files(file_name2, num_parts)
     return
 
-# HOST_ADD =   # The server's hostname or IP address
-# PORT = 3000  # The port used by the server
-# SERVER_ADD = (os.getenv('HOST_IP'), int(os.getenv('LISTEN_PORT')))
+def client_side():
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.settimeout(1)
+    client.connect(("127.0.0.1",MAIN_PORT))
+    print(f"main socket on {client.getsockname()}")
+        # Create separate sockets for data transmission
+    socket_num = 4
+    data_sockets = {} #{index: socket} #start from 0
+    for i in range (socket_num):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(0.02)  # Set timeout for retransmissions
+        sock.connect(server_addr)
+        data_sockets[i] = sock
+    # Get the local address and port
+        local_addr = sock.getsockname()  # Returns (local_ip, local_port)
+        print(f"Data socket num {i} bound to local address {local_addr}, connected to {server_addr}")
+    
+    
+    
+
+    # handle reading file here
+        # Open a file for writing
+    # file_name = "hello.txt"
+    # file_name = "40KB.txt"
+    # file_name = "2MB.png"
+    # file_name = "10MB.pdf"
+    # file_name = "200MB_2.pdf"
+    file_name = "230MB.mp4"
+    file_req_arr = [file_name]  # tmp var for illustration
+    
+    
+    
+    
+    
+    while len(file_req_arr):
+        file_name = file_req_arr.pop(0)
+        receive_file(client,server_addr,  data_sockets , file_name) 
+    
 MAIN_PORT = 3000
 HOST_IP = "127.0.0.1"
 server_addr = (HOST_IP, MAIN_PORT)  
 
 BUFFER_SIZE = 1200
 RESEND_TIMEOUT = 2  # Timeout in seconds
-client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-client.settimeout(RESEND_TIMEOUT)
-client.connect(("127.0.0.1",MAIN_PORT))
-print(f"main socket on {client.getsockname()}")
 
-# Create separate sockets for data transmission
-socket_num = 4
-data_sockets = {} #{index: socket} #start from 0
-for i in range (socket_num):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(RESEND_TIMEOUT)  # Set timeout for retransmissions
-    sock.connect(server_addr)
-    data_sockets[i] = sock
- # Get the local address and port
-    local_addr = sock.getsockname()  # Returns (local_ip, local_port)
-    print(f"Data socket num {i} bound to local address {local_addr}, connected to {server_addr}")
+
+
     
 
-
-# Open a file for writing
-# file_name = "hello.txt"
-# file_name = "40KB.txt"
-# file_name = "2MB.png"
-# file_name = "10MB.pdf"
-# file_name = "200MB_2.pdf"
-file_name = "230MB.mp4"
+client_side()
 
 
-receive_file(client,server_addr,  data_sockets , file_name) 
 
 
-print(f"File saved as {file_name}")
+print("End program")
