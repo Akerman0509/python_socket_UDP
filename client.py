@@ -148,34 +148,50 @@ file_queue = []
 def debug_log(message):
     print(f"[DEBUG] {time.strftime('%H:%M:%S')} - {message}")
 
+def request_file_list(client):
+    """Lấy danh sách file từ server"""
+    try:
+        client.sendto("LIST".encode(), SERVER_ADD)
+        data, addr = client.recvfrom(BUFFER_SIZE)
+        file_list = data.decode().split("\n")
+        debug_log(f"Received file list: {file_list}")
+        return set(file_list)
+    except socket.timeout:
+        print("Timeout when requesting file list")
+        return set()
+
 def read_new_files():
+    """Đọc danh sách file từ input.txt"""
     debug_log("Scanning input.txt...")
-    
+
     if not os.path.exists(INPUT_FILE):
-        open(INPUT_FILE, "w").close()  
+        open(INPUT_FILE, "w").close()
         return []
 
     with open(INPUT_FILE, "r") as f:
-        all_files = {line.strip() for line in f if line.strip()}  
+        all_files = {line.strip() for line in f if line.strip()}
 
-    # Filter out processed files
-    new_files = list(all_files - processed_files)
+    return list(all_files - processed_files)
 
-    if new_files:
-        debug_log(f"New file: {new_files}")
-
-    return new_files
-
-
+# Scan file in list available
 def scanFile():
+    """Kiểm tra file mới và thêm vào hàng đợi nếu file hợp lệ"""
     while True:
-        debug_log("check file input.txt...")
+        debug_log("Checking input.txt...")
         new_files = read_new_files()
+
         if new_files:
-            file_queue.extend(new_files)  
-            processed_files.update(new_files) 
-            debug_log(f"Queue: {file_queue}")
-        time.sleep(5)  
+            available_files = request_file_list(client) 
+            valid_files = [file for file in new_files if file in available_files]
+
+            if valid_files:
+                file_queue.extend(valid_files)
+                processed_files.update(valid_files)
+                debug_log(f"Added to queue: {valid_files}")
+            else:
+                debug_log("No valid files found in input.txt")
+
+        time.sleep(5)
 
 
 # HOST_ADD =   # The server's hostname or IP address
@@ -199,53 +215,26 @@ client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 client.settimeout(RESEND_TIMEOUT)
 client.connect(("127.0.0.1",2000))
 
-def request_file_list(client):
-    try:
-        client.sendto("LIST".encode(), SERVER_ADD) 
-        data, addr = client.recvfrom(BUFFER_SIZE)  
-        file_list = data.decode().split("\n")  
-        print("\nAvailable Files:")
-        for file in file_list:
-            print(f" - {file}")
-        return file_list
-    except socket.timeout:
-        print("Timeout")
-        return []
-
-
-
-
-
-
-# Scan file every 5 seconds
-read_new_files()
-scanner_thread = threading.Thread(target=scanFile, daemon=True)
-scanner_thread.start()
 
 def main():
-
-   
     global running
     running = True
     scanner_thread = threading.Thread(target=scanFile, daemon=True)
     scanner_thread.start()
-    
-    #  Request file list from server
-    file_list = request_file_list(client)
+
     try:
         while running:
             if file_queue:
                 file_name = file_queue.pop(0)
-                debug_log(f"Take file from queue: {file_name}")
-                #Download file
-                debug_log(f"Queue after download : {file_queue}")
+                debug_log(f"Processing file from queue: {file_name}")
+                debug_log(f"Queue after processing: {file_queue}")
             else:
                 debug_log("No file in queue...")
                 time.sleep(1)
     except KeyboardInterrupt:
-        running = False  
+        running = False
         time.sleep(1)
-        debug_log("Exit!")
+        debug_log("Exiting...")
 
 if __name__ == "__main__":
     main()

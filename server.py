@@ -7,9 +7,37 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+SERVER_DIR = "serverFiles"
 FILE_LIST_PATH = "allowFile.txt"
 
+def get_file_size_str(size_bytes):
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(size_bytes)
+    unit_index = 0
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+    return f"{int(size)}{units[unit_index]}"
+
+def scan_and_save_files():
+    if not os.path.exists(SERVER_DIR):
+        print(f"{SERVER_DIR} does not exist!")
+        return
+    
+    file_list = []
+    for file_name in os.listdir(SERVER_DIR):
+        file_path = os.path.join(SERVER_DIR, file_name)
+        if os.path.isfile(file_path):
+            file_size = os.path.getsize(file_path)
+            file_list.append(f"{file_name} {get_file_size_str(file_size)}")
+    
+    with open(FILE_LIST_PATH, "w") as f:
+        f.write("\n".join(file_list))
+    print("The file list has been updated in allowFile.txt")
+
+
 def load_file_list():
+    scan_and_save_files()
     files = {}
     if not os.path.exists(FILE_LIST_PATH):
         print("File list not found!")
@@ -126,7 +154,10 @@ def sendFile(server,file_path, address):
     
     
     return 1
-    
+
+# Function Scan and update to allowFile.txt
+### scan_and_save_files()
+
 # Port to listen on (non-privileged ports are > 1023)
 # 0 to 65,535
 LISTEN_PORT  = int(os.getenv('LISTEN_PORT'))
@@ -154,3 +185,4 @@ file_name, address = rcv_req(server)
 
 if file_name is None:
     print("Sent file list to client.")
+
