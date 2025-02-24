@@ -308,7 +308,7 @@ def receive_file(client, server_addr, data_sockets,  file_name ):
     file_path = f"clientFiles/{file_name2}"
     
     
-    wnd_max = min(10 , seq_max) # change for speed
+    wnd_max = min(40 , seq_max) # change for speed
     print(f"wnd_max = {wnd_max}")
     receive_threads = []
     num_parts = len(data_ranges)
@@ -434,10 +434,10 @@ def client_side():
     # file_name = "hello.txt"
     # file_name = "40KB.txt"
     # file_name = "2MB.png"
-    file_name = "730KB.pdf"
+    # file_name = "730KB.pdf"
     # file_name = "10MB.pdf"
     # file_name = "200MB_2.pdf"
-    # file_name = "230MB.mp4"
+    file_name = "230MB.mp4"
     receive_file(client,server_addr,  data_sockets , file_name) 
     
     # try:

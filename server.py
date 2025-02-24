@@ -170,12 +170,17 @@ def start_process_func(server, server_files):
             print("Waiting for request ...")
             continue
 
-def add_fuel(n_shift_arr, buffer, wnd_max, seq_max, part_index):
-    print(f"=================Adding fuel to thread {part_index}===============")
-    n_shift_arr[part_index] += wnd_max
-    for i in range(wnd_max):
-        shift_window(buffer, seq_max)   
-    return
+def add_fuel(n_shift_arr, buffer, wnd_max, seq_max, part_index, start_num):
+    n_shift_arr[part_index] = wnd_max  # Increase the window shift
+    buffer.clear()  
+    tmp_start = seq_max - wnd_max + 1
+    # print(f"tmp_start = {tmp_start}")
+    new_values = []
+    if start_num >= tmp_start:
+        new_values = list(range(tmp_start, seq_max + 1))
+    else:
+        new_values = list(range(start_num, start_num + wnd_max))  # Adjusted range
+    buffer += new_values  # Ensures list is modified externally
         
 def handle_ack(pkt_seq, n_shift_arr, buffers, file_parts, wnd_max):
     
@@ -213,7 +218,7 @@ def sendFile(server):
     send_completed = threading.Event()    
 
     file_name, client_addr, seq_max, file_parts = start_process_func(server, server_files)
-    wnd_max = min(10, seq_max)
+    wnd_max = min(40, seq_max)
     buffers = [[] for _ in range (len(file_parts))]
     
     
@@ -234,7 +239,7 @@ def sendFile(server):
     
     # Receive thread
     def receiver():
-        nonlocal file_name, address, seq_max ,buffers, n_shift_arr, file_parts, send_completed, shared_cv, server,stop_flags,curr_sent_arr,continue_sending
+        nonlocal file_name, address ,buffers, n_shift_arr, file_parts, send_completed, shared_cv, server,stop_flags,curr_sent_arr,continue_sending
         while not send_completed.is_set():
             try:
                 data, addr = server.recvfrom(BUFFER_SIZE)
@@ -265,7 +270,7 @@ def sendFile(server):
                     server.sendto(pkt, address)
                     print(f"++ Sending Nack chunk {pkt_seq}")
                     temp_part_index = identify_thread_num(pkt_seq, file_parts)
-                    if pkt_seq < buffers[temp_part_index][0]:
+                    if pkt_seq < buffers[temp_part_index][0] - wnd_max//2:
                         with shared_cv:
                             continue_sending[temp_part_index] = False
                             print(f"Stop sending from thread {temp_part_index}")
@@ -284,6 +289,7 @@ def sendFile(server):
                     with shared_cv:
                         continue_sending[temp_part_index] = True
                         print(f"Continue sending from thread {temp_part_index} with client pkt {pkt_seq}")
+                        add_fuel(n_shift_arr, buffers[temp_part_index], wnd_max, file_parts[temp_part_index][1], temp_part_index, pkt_seq + 1)
                     
 
             except socket.timeout:
@@ -291,7 +297,7 @@ def sendFile(server):
                 continue
     
     def send_file_parts(socket_data, file_name, start_end, part_index, wnd_buffer, address):
-        LOSS_RATE = 0.1
+        LOSS_RATE = 0
         nonlocal wnd_max, server, shared_cv, n_shift_arr,stop_flags,curr_sent_arr,continue_sending
         print (f"$$ start sending part {part_index}")
         # Window and state initialization
