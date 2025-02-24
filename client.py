@@ -27,12 +27,18 @@ def missing_pkt(data_buffer):
     return -1
 
 # newest received pkt index
+# def newest_pkt(start, arr_base, data_buffer):
+#     for i in range(len(data_buffer)):
+#         if data_buffer[i] == None:
+#             index  = i + arr_base + start - 1
+#             return index
+#     return -1
 def newest_pkt(start, arr_base, data_buffer):
     for i in range(len(data_buffer)):
         if data_buffer[i] == None:
             index  = i + arr_base + start - 1
             return index
-    return -1
+    return len(data_buffer) + arr_base + start - 1
 
 def index_to_seq(start, index, arr_base):
     seq_num = index + arr_base + start
@@ -44,11 +50,12 @@ def count_consec(start, curr_seq, arr_base):
     tmp  = curr_seq - arr_base - start + 1
     return tmp
 def adjust_buffer(data_buffer, wnd_max, buffer_max):    
-    # bool_buffer = bool_buffer[10:]
-    data_buffer = data_buffer[wnd_max:]
+    # data_buffer = data_buffer[wnd_max:]
     
-    # bool_buffer.extend([False] * (20 - len(bool_buffer)))
-    data_buffer.extend([None] * (buffer_max - len(data_buffer)))
+    # data_buffer.extend([None] * (buffer_max - len(data_buffer)))
+    data_buffer.clear()
+    data_buffer.extend([None] * wnd_max)
+    # print("data_buffer: ", data_buffer) 
     return data_buffer
 def compute_checksum(chunk: bytes) -> str:
     sha256_hash = hashlib.sha256()
@@ -189,7 +196,8 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
     missing_boolen = False
     max_seq_rcved = 0
     start, end = start_end
-    buffer_max = wnd_max + 10
+    # buffer_max = wnd_max + 10
+    buffer_max = wnd_max
     data_buffer = [None] * buffer_max
     # data_buffer[0] = "dummy"          #no metadata, receive from index 0
     arr_base = 0
@@ -209,15 +217,18 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                 # nACK for failed pkt
                 print("Invalid pkt")
                 send_Nack(socket_data, pkt_seq, server_addr)
+            elif pkt_seq < curr_seq:
+                continue
             else:
                 # if the pkt seq out of buffer
                 if (pkt_seq >= start + arr_base + buffer_max ):
-                    print(f"pkt_seq {pkt_seq} out of buffer")
+                    send_Nack(socket_data, req_seq, server_addr) ################
+                    print(f"pkt_seq {pkt_seq} out of buffer, send nACK for {req_seq}")
                     continue
                 # add to buffer
                 max_seq_rcved = max(max_seq_rcved, pkt_seq)
                 index = seq_to_index(start, pkt_seq, arr_base, buffer_max) 
-                # print(f"Thread {part_index} -------index = {index}")
+                print(f"Thread {part_index} -------index = {index}")
                 data_buffer[index] = chunk
                 # print("data_buffer: ", data_buffer)
                 if past_missing[0] == pkt_seq:  # missing pkt is resolved
@@ -226,12 +237,12 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                 debug_log (f"------------- past missing = {past_missing}")
                 check_holes = missing_pkt(data_buffer)
                 if (check_holes != -1): # wanting missing pkt index
-                    print(f"%%% missing index = {check_holes}")
+                    # print(f"%%% missing index = {check_holes}")
                     missing_boolen = True
                     req_seq = index_to_seq(start, check_holes, arr_base)
                     debug_log(f"?? there is a hole for pkt {req_seq}")
                     if past_missing[0] != req_seq: #change missing pkt
-                        past_missing = (req_seq, False, 2)
+                        past_missing = (req_seq, False, wnd_max // 8)
                         # debug_log(f"Thread {part_index} ++ send nACK01 <<< for pkt {req_seq}")
                         # send_Nack(socket_data, req_seq, server_addr)
                     else: # missing pkt is the same
@@ -239,12 +250,15 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                         if past_missing[2] <= 0 and not past_missing[1] and past_missing[0] < max_seq_rcved: # missing pkt is not resolved
                             debug_log(f"Thread {part_index} ++ send nACK02 <<< for pkt {req_seq}")
                             send_Nack(socket_data, req_seq, server_addr)
-                            past_missing = (req_seq,False,3)
+                            past_missing = (req_seq,False,wnd_max // 5)
                 
                         
 
                 else:
-                    req_seq = newest_pkt(start, arr_base , data_buffer) + 1
+                    # req_seq = newest_pkt(start, arr_base , data_buffer) + 1
+                    req_seq = max_seq_rcved + 1
+                    print(f"++ newest pkt = {req_seq - 1}, -------index = {seq_to_index(start, req_seq - 1, arr_base, buffer_max)}")
+                    
                     if missing_boolen == True:
                         print(f"~~~ Sending continue Signal with curr-seq = {req_seq-1}")
                         send_continue_msg(socket_data, req_seq-1, server_addr)
@@ -267,6 +281,7 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
             if consec_pkt >= wnd_max:
                 append_file(f"{file_name}", data_buffer,start , arr_base,  wnd_max)
                 # print("data_buffer: ", data_buffer)
+                
                 data_buffer = adjust_buffer(data_buffer, wnd_max, buffer_max)
                 arr_base += wnd_max
             
@@ -280,7 +295,8 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                 return
         except socket.timeout:
             print(f"Timeout for pkt, send nACK for {req_seq}") 
-            send_Nack(socket_data, req_seq, server_addr)
+            # send_Nack(socket_data, req_seq, server_addr)
+            send_continue_msg(socket_data, req_seq, server_addr)
             continue
         
 
@@ -308,7 +324,7 @@ def receive_file(client, server_addr, data_sockets,  file_name ):
     file_path = f"clientFiles/{file_name2}"
     
     
-    wnd_max = min(40 , seq_max) # change for speed
+    wnd_max = min(20 , seq_max) # change for speed
     print(f"wnd_max = {wnd_max}")
     receive_threads = []
     num_parts = len(data_ranges)
@@ -422,7 +438,7 @@ def client_side():
     data_sockets = {} #{index: socket} #start from 0
     for i in range (socket_num):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(2)  # Set timeout for retransmissions
+        sock.settimeout(1)  # Set timeout for retransmissions
         sock.connect(server_addr)
         data_sockets[i] = sock
     # Get the local address and port
@@ -433,11 +449,11 @@ def client_side():
         # Open a file for writing
     # file_name = "hello.txt"
     # file_name = "40KB.txt"
-    # file_name = "2MB.png"
+    file_name = "2MB.png"
     # file_name = "730KB.pdf"
     # file_name = "10MB.pdf"
     # file_name = "200MB_2.pdf"
-    file_name = "230MB.mp4"
+    # file_name = "230MB.mp4"
     receive_file(client,server_addr,  data_sockets , file_name) 
     
     # try:

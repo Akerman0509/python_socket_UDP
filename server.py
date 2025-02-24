@@ -218,7 +218,7 @@ def sendFile(server):
     send_completed = threading.Event()    
 
     file_name, client_addr, seq_max, file_parts = start_process_func(server, server_files)
-    wnd_max = min(40, seq_max)
+    wnd_max = min(20, seq_max)
     buffers = [[] for _ in range (len(file_parts))]
     
     
@@ -263,14 +263,14 @@ def sendFile(server):
                 elif flag == "nACK":
                     pkt_seq = int(msg[1])
                     debug_log(f"++Received NACK for seq_num {pkt_seq}")
-                    temp_part_index = identify_thread_num(pkt_seq, file_parts)
+                    # temp_part_index = identify_thread_num(pkt_seq, file_parts)
+                    temp_part_index = 0
                     # print(f"++ Thread number: {temp_part_index}")
   
                     pkt = create_pkt(file_name, pkt_seq)
                     server.sendto(pkt, address)
                     print(f"++ Sending Nack chunk {pkt_seq}")
-                    temp_part_index = identify_thread_num(pkt_seq, file_parts)
-                    if pkt_seq < buffers[temp_part_index][0] - wnd_max//2:
+                    if pkt_seq < buffers[temp_part_index][0] - 10:
                         with shared_cv:
                             continue_sending[temp_part_index] = False
                             print(f"Stop sending from thread {temp_part_index}")
@@ -285,11 +285,12 @@ def sendFile(server):
                         
                 elif flag == "Continue":
                     pkt_seq = int(msg[1])
-                    temp_part_index = identify_thread_num(pkt_seq, file_parts)
+                    temp_part_index = 0 # for debugging 
                     with shared_cv:
                         continue_sending[temp_part_index] = True
                         print(f"Continue sending from thread {temp_part_index} with client pkt {pkt_seq}")
-                        add_fuel(n_shift_arr, buffers[temp_part_index], wnd_max, file_parts[temp_part_index][1], temp_part_index, pkt_seq + 1)
+                        curr_sent_arr[temp_part_index] = pkt_seq
+                        add_fuel(n_shift_arr, buffers[temp_part_index], wnd_max, file_parts[-1][1], temp_part_index, pkt_seq + 1)
                     
 
             except socket.timeout:
@@ -297,7 +298,7 @@ def sendFile(server):
                 continue
     
     def send_file_parts(socket_data, file_name, start_end, part_index, wnd_buffer, address):
-        LOSS_RATE = 0
+        LOSS_RATE = 0.2
         nonlocal wnd_max, server, shared_cv, n_shift_arr,stop_flags,curr_sent_arr,continue_sending
         print (f"$$ start sending part {part_index}")
         # Window and state initialization
@@ -321,14 +322,14 @@ def sendFile(server):
             if continue_sending[part_index]:
                 with shared_cv:
                     # Wait until n_var is greater than 0 (i.e. receiver signalled a need to send packets)
-                    print(f">>> n_shift_arr: {n_shift_arr}")
                     while n_shift_arr[part_index] == 0 :
                         if stop_flags[part_index]:
                             break
-                        print(f"thread {part_index}: waiting for n_var change")
+                        # print(f"thread {part_index}: waiting for n_var change")
                         # shared_cv.wait(timeout=0.01)
                         shared_cv.wait(timeout=0.01)
                     # Capture the number of packets to send and reset n_var atomically.
+                    print(f">>> n_shift_arr: {n_shift_arr}")
                     packets_to_send = n_shift_arr[part_index]
                     print(f"@@@ thread {part_index}: packets_to_send = {packets_to_send}")
                     n_shift_arr[part_index] = 0
