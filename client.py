@@ -3,6 +3,7 @@ import hashlib
 import os
 import threading
 import ast
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -84,7 +85,20 @@ def handle_pkt0(client, server_addr):
             send_Nack(client, 0, server_addr)
             print("Timeout for pkt0")
 
+
+# def control_nACK (nACK_var, seq_num, creation = 0, resolved = False):
+#     if creation:
+#         nACK_var[seq_num] = seq_num
+#         nACK_var["count_down"] = 4
+#         nACK_var["resolved"] = False
+#     else:
+#         nACK_var["count_down"] -= 1
         
+#     if resolved:
+#         nACK_var["resolved"] = True
+#     if nACK_var["count_down"] == 0:
+#         return seq_num
+#     return None
 def append_file(file_name, data_buffer,start, arr_base,  wnd_max):
     print("$$ write to file")
     file_path = f"clientFiles/{file_name}"
@@ -156,6 +170,11 @@ def send_fname(client, file_name, server_addr):
         except socket.timeout:
             print("Timeout for first pkt")
     
+def send_continue_msg(socket_data, curr_seq, server_addr):
+    msg = f"Continue:{curr_seq}".encode()
+    socket_data.sendto(msg, server_addr)
+    
+    
 def file_part_name(file_name, part_index):  
     return f"{file_name}_part{part_index}"
 def merge_files(file_name, num_parts):
@@ -166,7 +185,9 @@ def merge_files(file_name, num_parts):
                 outfile.write(infile.read())
             os.remove(file_part)
 def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part_index):
-
+    past_missing = (0,False,4)
+    missing_boolen = False
+    max_seq_rcved = 0
     start, end = start_end
     buffer_max = wnd_max + 10
     data_buffer = [None] * buffer_max
@@ -175,7 +196,7 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
     
     req_seq = start # dummy
     curr_seq = start
-    file_name = file_part_name(file_name, part_index)
+    # file_name = file_part_name(file_name, part_index)
     
     socket_data.sendto(f"START:0".encode(), server_addr) # potential loss
     while True:
@@ -183,7 +204,7 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
             
             data, addr = socket_data.recvfrom(BUFFER_SIZE)
             pkt_seq, chunk = process_pkt(data)
-            print(f"== Receiving pkt with seq_num: {pkt_seq}")
+            debug_log(f"== Receiving pkt with seq_num: {pkt_seq}")
             if (pkt_seq == None or chunk == None):
                 # nACK for failed pkt
                 print("Invalid pkt")
@@ -194,26 +215,50 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                     print(f"pkt_seq {pkt_seq} out of buffer")
                     continue
                 # add to buffer
+                max_seq_rcved = max(max_seq_rcved, pkt_seq)
                 index = seq_to_index(start, pkt_seq, arr_base, buffer_max) 
-                print(f"Thread {part_index} -------index = {index}")
+                # print(f"Thread {part_index} -------index = {index}")
                 data_buffer[index] = chunk
                 # print("data_buffer: ", data_buffer)
+                if past_missing[0] == pkt_seq:  # missing pkt is resolved
+                    past_missing = (pkt_seq,True,5)
                 # find missing pkt with nACK
-                req_seq_index = missing_pkt(data_buffer)
-                if (req_seq_index != -1): # wanting missing pkt index
-                    req_seq = index_to_seq(start, req_seq_index, arr_base)
-                    print(f"Thread {part_index} == send nACK for pkt {req_seq}")
-                    send_Nack(socket_data, req_seq, server_addr)
+                debug_log (f"------------- past missing = {past_missing}")
+                check_holes = missing_pkt(data_buffer)
+                if (check_holes != -1): # wanting missing pkt index
+                    print(f"%%% missing index = {check_holes}")
+                    missing_boolen = True
+                    req_seq = index_to_seq(start, check_holes, arr_base)
+                    debug_log(f"?? there is a hole for pkt {req_seq}")
+                    if past_missing[0] != req_seq: #change missing pkt
+                        past_missing = (req_seq, False, 2)
+                        # debug_log(f"Thread {part_index} ++ send nACK01 <<< for pkt {req_seq}")
+                        # send_Nack(socket_data, req_seq, server_addr)
+                    else: # missing pkt is the same
+                        past_missing = (past_missing[0],False,past_missing[2] - 1)
+                        if past_missing[2] <= 0 and not past_missing[1] and past_missing[0] < max_seq_rcved: # missing pkt is not resolved
+                            debug_log(f"Thread {part_index} ++ send nACK02 <<< for pkt {req_seq}")
+                            send_Nack(socket_data, req_seq, server_addr)
+                            past_missing = (req_seq,False,3)
+                
+                        
+
                 else:
                     req_seq = newest_pkt(start, arr_base , data_buffer) + 1
+                    if missing_boolen == True:
+                        print(f"~~~ Sending continue Signal with curr-seq = {req_seq-1}")
+                        send_continue_msg(socket_data, req_seq-1, server_addr)
+                    missing_boolen = False
                 curr_seq = req_seq-1
                     
-                if(req_seq < pkt_seq):
-                    print(f"Thread {part_index} ++ send nACK <<< for pkt {req_seq}")
-                    send_Nack(socket_data, req_seq, server_addr)
-                else:
-                    print(f"Thread {part_index} == send ACK for pkt {pkt_seq}")    
-                    send_ack(socket_data, pkt_seq, server_addr) # success
+                # if(req_seq < pkt_seq):
+                #     print(f"Thread {part_index} ++ send nACK <<< for pkt {req_seq}")
+                #     if count_down == 0:
+                #         send_Nack(socket_data, req_seq, server_addr)
+                #         count_down = 4
+                # else:
+                print(f"Thread {part_index} == send ACK for pkt {pkt_seq}")    
+                send_ack(socket_data, pkt_seq, server_addr) # success
                 #if ack cannot reach server ???? resend in timeout
 
             # write continuous data to file
@@ -253,72 +298,167 @@ def send_addr(client, server_addr, data_sockets):
             continue
     
 def receive_file(client, server_addr, data_sockets,  file_name ):
+    global IDLE_FLAG
     seq_max, file_name2, data_ranges_str = send_fname(client, file_name,server_addr )
     send_addr(client, server_addr, data_sockets)
     if seq_max and file_name2 and data_ranges_str:
         print(f"receive: {seq_max} and {file_name2} and {data_ranges_str}")
     data_ranges = ast.literal_eval(data_ranges_str)
-    # for i in range(len(data_ranges)):
-    #     print(f"part {i} : {data_ranges[i]}, start: {data_ranges[i][0]}, end: {data_ranges[i][1]}")
+
     file_path = f"clientFiles/{file_name2}"
     
     
-    wnd_max = min(30 , seq_max) # change for speed
+    wnd_max = min(10 , seq_max) # change for speed
     print(f"wnd_max = {wnd_max}")
     receive_threads = []
-    # threading.Thread(target=receive_parts, args=(client, server_addr, file_name2, wnd_max, data_ranges[0], 0)).start()
     num_parts = len(data_ranges)
-    for i in range (num_parts):
-    # for k in range (1):
-        # i = 3
-        thread = threading.Thread(target=receive_parts, args=(data_sockets[i], server_addr, file_name2, wnd_max, data_ranges[i], i))
-        thread.start()
-        receive_threads.append(thread)
+    # for i in range (num_parts):
+    # # for k in range (1):
+    #     # i = 3
+    #     thread = threading.Thread(target=receive_parts, args=(data_sockets[i], server_addr, file_name2, wnd_max, data_ranges[i], i))
+    #     thread.start()
+    #     receive_threads.append(thread)
         
-    for thread in receive_threads:
-        thread.join()
+    # for thread in receive_threads:
+    #     thread.join()
+    start = data_ranges[0][0]
+    end = data_ranges[-1][1]
+    start_end = (start, end)
+    print(f"+++ start_end = {start_end}")
+    thread = threading.Thread(target=receive_parts, args=(data_sockets[0], server_addr, file_name2, wnd_max,  start_end, 0))
+    thread.start()
+    
+    thread.join()
         
     print("All parts received")
-    merge_files(file_name2, num_parts)
+    # merge_files(file_name2, num_parts)
+    IDLE_FLAG = True
     return
 
+
+def request_file_list(client):
+    file_list = []
+    while True:
+        try:
+            client.sendto("LIST".encode(), server_addr) 
+            data, addr = client.recvfrom(BUFFER_SIZE)  
+            flag = data.decode().split(":")[0]
+            if flag == "LIST":
+                filename_str = data.decode().split(":")[1]
+                file_list = filename_str.split(",")
+            print("\nAvailable Files:")
+            for i in range(len(file_list)):    
+                print(f"file {i} : {file_list[i]}")
+            return file_list
+        except socket.timeout:
+            print("Timeout for requesting file list")
+            continue
+
+def debug_log(message):
+    print(f"[DEBUG] {time.strftime('%H:%M:%S')} - {message}")
+
+def read_new_files(processed_files):
+    # debug_log("Scanning input.txt...")
+    # create file if not exist
+    if not os.path.exists(INPUT_FILE):
+        open(INPUT_FILE, "w").close()  
+        return []
+
+    with open(INPUT_FILE, "r") as f:
+        all_files = {line.strip() for line in f if line.strip()}  
+    # Filter out processed files
+    new_files = list(all_files - processed_files)
+    if new_files:
+        debug_log(f"New input file: {new_files}")
+    return new_files
+
+def schedule_next_scan(file_queue, processed_files, server_files):
+    global RUNNING_FLAG
+    """Schedule the next scan using Timer"""
+    if RUNNING_FLAG:
+        timer = threading.Timer(5.0, scan_file, args=[file_queue, processed_files, server_files])
+        timer.start()
+    
+def scan_file(file_queue, processed_files, server_files):
+    """Kiểm tra file mới và thêm vào hàng đợi nếu file hợp lệ"""
+    debug_log("Checking input.txt...")
+    new_files = read_new_files(processed_files)
+    print(f"file queue: {file_queue}")
+    print(f"processed files: {processed_files}")
+    if new_files:
+        valid_files = [file for file in new_files if file in server_files]
+        if valid_files:
+            file_queue.extend(valid_files)
+            processed_files.update(valid_files)
+            debug_log(f"Added to queue: {valid_files}")
+        else:
+            debug_log("Invalid input, please rewrite the file name")
+# Schedule the next scan
+    schedule_next_scan(file_queue, processed_files, server_files)
+
+
 def client_side():
+    global RUNNING_FLAG, IDLE_FLAG
+    processed_files = set()
+    file_queue = [] 
+    # Scan file every 5 seconds
+    
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     client.settimeout(1)
     client.connect(("127.0.0.1",MAIN_PORT))
     print(f"main socket on {client.getsockname()}")
+    
+    server_files = request_file_list(client)
+
+    # Start the first scan, which will schedule subsequent scans
+    # schedule_next_scan(file_queue, processed_files, server_files)
+
+    
+
+    
         # Create separate sockets for data transmission
+    #  Request file list from server
     socket_num = 4
     data_sockets = {} #{index: socket} #start from 0
     for i in range (socket_num):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(0.02)  # Set timeout for retransmissions
+        sock.settimeout(2)  # Set timeout for retransmissions
         sock.connect(server_addr)
         data_sockets[i] = sock
     # Get the local address and port
         local_addr = sock.getsockname()  # Returns (local_ip, local_port)
         print(f"Data socket num {i} bound to local address {local_addr}, connected to {server_addr}")
     
-    
-    
-
     # handle reading file here
         # Open a file for writing
     # file_name = "hello.txt"
     # file_name = "40KB.txt"
     # file_name = "2MB.png"
+    file_name = "730KB.pdf"
     # file_name = "10MB.pdf"
     # file_name = "200MB_2.pdf"
-    file_name = "230MB.mp4"
-    file_req_arr = [file_name]  # tmp var for illustration
+    # file_name = "230MB.mp4"
+    receive_file(client,server_addr,  data_sockets , file_name) 
     
-    
-    
-    
-    
-    while len(file_req_arr):
-        file_name = file_req_arr.pop(0)
-        receive_file(client,server_addr,  data_sockets , file_name) 
+    # try:
+    #     while RUNNING_FLAG:
+    #         # send next file in queue
+    #         if len(file_queue) and IDLE_FLAG:
+    #             next_filename = file_queue.pop(0)
+    #             debug_log(f"Sending file: {next_filename}")
+                
+    #             #Download file
+    #             debug_log(f"Queue after download : {file_queue}")
+    #             IDLE_FLAG = False
+    #             # receive_file(client,server_addr,  data_sockets , next_filename) 
+    # except KeyboardInterrupt:
+    #     RUNNING_FLAG = False
+    #     time.sleep(1)
+    #     debug_log("Exit!")
+    #     client.close()
+    #     for sock in data_sockets.values():
+    #         sock.close()
+
     
 MAIN_PORT = 3000
 HOST_IP = "127.0.0.1"
@@ -327,13 +467,15 @@ server_addr = (HOST_IP, MAIN_PORT)
 BUFFER_SIZE = 1200
 RESEND_TIMEOUT = 2  # Timeout in seconds
 
+# client_side()
+# print("End program")
+INPUT_FILE = "input.txt" 
+RUNNING_FLAG = True
+IDLE_FLAG = True
+def main():
 
+    client_side()
+    print("End program")
 
-    
-
-client_side()
-
-
-
-
-print("End program")
+if __name__ == "__main__":
+    main()
