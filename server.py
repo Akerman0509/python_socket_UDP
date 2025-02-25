@@ -218,7 +218,7 @@ def sendFile(server):
     send_completed = threading.Event()    
 
     file_name, client_addr, seq_max, file_parts = start_process_func(server, server_files)
-    wnd_max = min(20, seq_max)
+    wnd_max = min(40, seq_max)
     buffers = [[] for _ in range (len(file_parts))]
     
     
@@ -254,7 +254,7 @@ def sendFile(server):
                         # # Increase n_var only if the ACK is valid and we haven't exceeded a limit.
                         handle_ack(pkt_seq, n_shift_arr, buffers, file_parts, wnd_max)
                         print(f"**** n_shift_arr: {n_shift_arr}")
-                        print(f"buffers: {buffers}")
+                        # print(f"buffers: {buffers}")
                         print(f"curr_sent_arr: {curr_sent_arr}")
                         # print(f"**** buffers: {buffers}")
                         # Notify sender thread that there is work to do.
@@ -289,8 +289,9 @@ def sendFile(server):
                     with shared_cv:
                         continue_sending[temp_part_index] = True
                         print(f"Continue sending from thread {temp_part_index} with client pkt {pkt_seq}")
-                        curr_sent_arr[temp_part_index] = pkt_seq
-                        add_fuel(n_shift_arr, buffers[temp_part_index], wnd_max, file_parts[-1][1], temp_part_index, pkt_seq + 1)
+                        curr_sent_arr[temp_part_index] = pkt_seq - 1
+                        add_fuel(n_shift_arr, buffers[temp_part_index], wnd_max, file_parts[-1][1], temp_part_index, pkt_seq)
+                        shared_cv.notify_all()
                     
 
             except socket.timeout:
@@ -298,7 +299,7 @@ def sendFile(server):
                 continue
     
     def send_file_parts(socket_data, file_name, start_end, part_index, wnd_buffer, address):
-        LOSS_RATE = 0.2
+        LOSS_RATE = 0.1
         nonlocal wnd_max, server, shared_cv, n_shift_arr,stop_flags,curr_sent_arr,continue_sending
         print (f"$$ start sending part {part_index}")
         # Window and state initialization
@@ -325,7 +326,7 @@ def sendFile(server):
                     while n_shift_arr[part_index] == 0 :
                         if stop_flags[part_index]:
                             break
-                        # print(f"thread {part_index}: waiting for n_var change")
+                        print(f"thread {part_index}: waiting for n_var change")
                         # shared_cv.wait(timeout=0.01)
                         shared_cv.wait(timeout=0.01)
                     # Capture the number of packets to send and reset n_var atomically.

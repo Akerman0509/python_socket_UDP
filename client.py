@@ -44,8 +44,11 @@ def index_to_seq(start, index, arr_base):
     seq_num = index + arr_base + start
     return seq_num
 def seq_to_index(start, seq_num, arr_base, buffer_max):
-    index  = (seq_num - arr_base - start) % buffer_max
-    return index
+    index  = (seq_num - arr_base - start)
+    if index < 0 or index >= buffer_max:
+        print (f"pkt {seq_num} out of buffer")
+        return index, False
+    return index, True
 def count_consec(start, curr_seq, arr_base):
     tmp  = curr_seq - arr_base - start + 1
     return tmp
@@ -193,7 +196,9 @@ def merge_files(file_name, num_parts):
             os.remove(file_part)
 def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part_index):
     past_missing = (0,False,4)
+    outbuffer_state = False
     missing_boolen = False
+    past_continue_index = 0
     max_seq_rcved = 0
     start, end = start_end
     # buffer_max = wnd_max + 10
@@ -217,63 +222,67 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                 # nACK for failed pkt
                 print("Invalid pkt")
                 send_Nack(socket_data, pkt_seq, server_addr)
-            elif pkt_seq < curr_seq:
+            elif pkt_seq < curr_seq: # if receive duplicate pkt
                 continue
             else:
                 # if the pkt seq out of buffer
-                if (pkt_seq >= start + arr_base + buffer_max ):
-                    send_Nack(socket_data, req_seq, server_addr) ################
-                    print(f"pkt_seq {pkt_seq} out of buffer, send nACK for {req_seq}")
-                    continue
+                if (pkt_seq >= start + arr_base + buffer_max ): 
+                    if outbuffer_state == False:
+                        print(f"pkt_seq {pkt_seq} out of buffer, send nACK for {req_seq} 1 time")
+                        send_Nack(socket_data, req_seq, server_addr)
+                        outbuffer_state = True
+                else:
+                    outbuffer_state = False
+
+                    # continue
                 # add to buffer
-                max_seq_rcved = max(max_seq_rcved, pkt_seq)
-                index = seq_to_index(start, pkt_seq, arr_base, buffer_max) 
+                index, outbuffer_flag = seq_to_index(start, pkt_seq, arr_base, buffer_max) 
                 print(f"Thread {part_index} -------index = {index}")
-                data_buffer[index] = chunk
+                if outbuffer_flag:
+                    data_buffer[index] = chunk
+                    max_seq_rcved = max(max_seq_rcved, pkt_seq)
+                    
+                    print(f"Thread {part_index} == send ACK for pkt {pkt_seq}")    
+                    send_ack(socket_data, pkt_seq, server_addr) # success
                 # print("data_buffer: ", data_buffer)
+                
                 if past_missing[0] == pkt_seq:  # missing pkt is resolved
                     past_missing = (pkt_seq,True,5)
+                    
                 # find missing pkt with nACK
                 debug_log (f"------------- past missing = {past_missing}")
                 check_holes = missing_pkt(data_buffer)
+                
                 if (check_holes != -1): # wanting missing pkt index
                     # print(f"%%% missing index = {check_holes}")
                     missing_boolen = True
                     req_seq = index_to_seq(start, check_holes, arr_base)
                     debug_log(f"?? there is a hole for pkt {req_seq}")
-                    if past_missing[0] != req_seq: #change missing pkt
-                        past_missing = (req_seq, False, wnd_max // 8)
-                        # debug_log(f"Thread {part_index} ++ send nACK01 <<< for pkt {req_seq}")
-                        # send_Nack(socket_data, req_seq, server_addr)
-                    else: # missing pkt is the same
-                        past_missing = (past_missing[0],False,past_missing[2] - 1)
-                        if past_missing[2] <= 0 and not past_missing[1] and past_missing[0] < max_seq_rcved: # missing pkt is not resolved
-                            debug_log(f"Thread {part_index} ++ send nACK02 <<< for pkt {req_seq}")
-                            send_Nack(socket_data, req_seq, server_addr)
-                            past_missing = (req_seq,False,wnd_max // 5)
-                
-                        
-
                 else:
-                    # req_seq = newest_pkt(start, arr_base , data_buffer) + 1
                     req_seq = max_seq_rcved + 1
-                    print(f"++ newest pkt = {req_seq - 1}, -------index = {seq_to_index(start, req_seq - 1, arr_base, buffer_max)}")
-                    
-                    if missing_boolen == True:
+                    tmp, _ = seq_to_index(start, req_seq - 1, arr_base, buffer_max)
+                    print(f"++ newest pkt = {req_seq - 1}, -------index = {tmp}")
+                    if missing_boolen == True and req_seq - 2 * wnd_max > past_continue_index:
+                        print (f"wnd_max = {wnd_max}")
                         print(f"~~~ Sending continue Signal with curr-seq = {req_seq-1}")
                         send_continue_msg(socket_data, req_seq-1, server_addr)
-                    missing_boolen = False
-                curr_seq = req_seq-1
+                        missing_boolen = False
+                        past_continue_index = req_seq - 1
+                        
                     
-                # if(req_seq < pkt_seq):
-                #     print(f"Thread {part_index} ++ send nACK <<< for pkt {req_seq}")
-                #     if count_down == 0:
-                #         send_Nack(socket_data, req_seq, server_addr)
-                #         count_down = 4
-                # else:
-                print(f"Thread {part_index} == send ACK for pkt {pkt_seq}")    
-                send_ack(socket_data, pkt_seq, server_addr) # success
-                #if ack cannot reach server ???? resend in timeout
+                if past_missing[0] != req_seq: #change missing pkt
+                    past_missing = (req_seq, False, wnd_max // 5)
+                else: # missing pkt is the same
+                    past_missing = (past_missing[0],past_missing[1],past_missing[2] - 1)
+                # send nACK for missing pkt
+                if past_missing[2] <= 0 and not past_missing[1] and past_missing[0] < max_seq_rcved: # missing pkt is not resolved
+                    debug_log(f"Thread {part_index} ++ send nACK02 <<< for pkt {req_seq}")
+                    send_Nack(socket_data, req_seq, server_addr)
+                    past_missing = (req_seq,False,wnd_max // 5)
+
+                    
+                
+                curr_seq = req_seq-1
 
             # write continuous data to file
             print(f"arr_base: {arr_base}, req_seq: {req_seq}")
@@ -324,7 +333,7 @@ def receive_file(client, server_addr, data_sockets,  file_name ):
     file_path = f"clientFiles/{file_name2}"
     
     
-    wnd_max = min(20 , seq_max) # change for speed
+    wnd_max = min(40 , seq_max) # change for speed
     print(f"wnd_max = {wnd_max}")
     receive_threads = []
     num_parts = len(data_ranges)
@@ -438,7 +447,7 @@ def client_side():
     data_sockets = {} #{index: socket} #start from 0
     for i in range (socket_num):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(1)  # Set timeout for retransmissions
+        sock.settimeout(0.02)  # Set timeout for retransmissions
         sock.connect(server_addr)
         data_sockets[i] = sock
     # Get the local address and port
@@ -449,11 +458,11 @@ def client_side():
         # Open a file for writing
     # file_name = "hello.txt"
     # file_name = "40KB.txt"
-    file_name = "2MB.png"
+    # file_name = "2MB.png"
     # file_name = "730KB.pdf"
     # file_name = "10MB.pdf"
     # file_name = "200MB_2.pdf"
-    # file_name = "230MB.mp4"
+    file_name = "230MB.mp4"
     receive_file(client,server_addr,  data_sockets , file_name) 
     
     # try:
