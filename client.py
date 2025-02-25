@@ -209,7 +209,7 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
     
     req_seq = start # dummy
     curr_seq = start
-    # file_name = file_part_name(file_name, part_index)
+    file_name = file_part_name(file_name, part_index)
     
     socket_data.sendto(f"START:0".encode(), server_addr) # potential loss
     while True:
@@ -237,7 +237,7 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                     # continue
                 # add to buffer
                 index, outbuffer_flag = seq_to_index(start, pkt_seq, arr_base, buffer_max) 
-                print(f"Thread {part_index} -------index = {index}")
+                # print(f"Thread {part_index} -------index = {index}")
                 if outbuffer_flag:
                     data_buffer[index] = chunk
                     max_seq_rcved = max(max_seq_rcved, pkt_seq)
@@ -250,14 +250,14 @@ def receive_parts(socket_data, server_addr,  file_name, wnd_max, start_end, part
                     past_missing = (pkt_seq,True,5)
                     
                 # find missing pkt with nACK
-                debug_log (f"------------- past missing = {past_missing}")
+                # debug_log (f"------------- past missing = {past_missing}")                            ####
                 check_holes = missing_pkt(data_buffer)
                 
                 if (check_holes != -1): # wanting missing pkt index
                     # print(f"%%% missing index = {check_holes}")
                     missing_boolen = True
                     req_seq = index_to_seq(start, check_holes, arr_base)
-                    debug_log(f"?? there is a hole for pkt {req_seq}")
+                    # debug_log(f"?? there is a hole for pkt {req_seq}")                    ####
                 else:
                     req_seq = max_seq_rcved + 1
                     tmp, _ = seq_to_index(start, req_seq - 1, arr_base, buffer_max)
@@ -337,26 +337,27 @@ def receive_file(client, server_addr, data_sockets,  file_name ):
     print(f"wnd_max = {wnd_max}")
     receive_threads = []
     num_parts = len(data_ranges)
-    # for i in range (num_parts):
-    # # for k in range (1):
-    #     # i = 3
-    #     thread = threading.Thread(target=receive_parts, args=(data_sockets[i], server_addr, file_name2, wnd_max, data_ranges[i], i))
-    #     thread.start()
-    #     receive_threads.append(thread)
+    for i in range (num_parts):
+    # for k in range (1):
+        # i = 3
+        thread = threading.Thread(target=receive_parts, args=(data_sockets[i], server_addr, file_name2, wnd_max, data_ranges[i], i))
+        thread.start()
+        receive_threads.append(thread)
         
-    # for thread in receive_threads:
-    #     thread.join()
-    start = data_ranges[0][0]
-    end = data_ranges[-1][1]
-    start_end = (start, end)
-    print(f"+++ start_end = {start_end}")
-    thread = threading.Thread(target=receive_parts, args=(data_sockets[0], server_addr, file_name2, wnd_max,  start_end, 0))
-    thread.start()
+    for thread in receive_threads:
+        thread.join()
     
-    thread.join()
+    # start = data_ranges[0][0]
+    # end = data_ranges[-1][1]
+    # start_end = (start, end)
+    # print(f"+++ start_end = {start_end}")
+    # thread = threading.Thread(target=receive_parts, args=(data_sockets[0], server_addr, file_name2, wnd_max,  start_end, 0))
+    # thread.start()
+    
+    # thread.join()
         
     print("All parts received")
-    # merge_files(file_name2, num_parts)
+    merge_files(file_name2, num_parts)
     IDLE_FLAG = True
     return
 
@@ -462,7 +463,9 @@ def client_side():
     # file_name = "730KB.pdf"
     # file_name = "10MB.pdf"
     # file_name = "200MB_2.pdf"
-    file_name = "230MB.mp4"
+    # file_name = "230MB.mp4"
+    file_name = "1.1GB.mkv"
+    
     receive_file(client,server_addr,  data_sockets , file_name) 
     
     # try:

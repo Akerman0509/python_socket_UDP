@@ -83,17 +83,17 @@ def shift_window(wnd_buffer, seq_max):
 
 def chunks_index(seq_max, part_nums = 4, buffer_size = 1024):
     arr = []
-    delimeter = part_nums - 1
-    part_size = seq_max // delimeter
+    part_size = seq_max // part_nums
+    remainder = seq_max % part_nums
     part1 = (1, part_size)
     part2 = (part_size + 1, 2 * part_size)
     part3 = (2 * part_size + 1, 3 * part_size)
+    part4 = (3 * part_size + 1, seq_max)
+    
     arr.append(part1)
     arr.append(part2)
     arr.append(part3)
-    if seq_max % delimeter != 0:
-        part4 = (3 * part_size + 1, seq_max)
-        arr.append(part4)
+    arr.append(part4)
     return arr
 
 
@@ -184,14 +184,13 @@ def add_fuel(n_shift_arr, buffer, wnd_max, seq_max, part_index, start_num):
         
 def handle_ack(pkt_seq, n_shift_arr, buffers, file_parts, wnd_max):
     
-    start = file_parts[0][0]    #change for debug
-    seq_max = file_parts[-1][1]
+    # start = file_parts[0][0]    #change for debug
+    # seq_max = file_parts[-1][1]
     
     n = len(file_parts)
-    for i in range(1):              #change for debug
+    for i in range(n):              #change for debug
         buffer = buffers[i]
-        # seq_max = file_parts[i][1]
-        # start = file_parts[i][0]
+        seq_max = file_parts[i][1]
         if check_ack_in_window(buffer, pkt_seq) and n_shift_arr[i] < wnd_max:
             n_shift_arr[i] += 1
             shift_window(buffer, seq_max)
@@ -263,8 +262,8 @@ def sendFile(server):
                 elif flag == "nACK":
                     pkt_seq = int(msg[1])
                     debug_log(f"++Received NACK for seq_num {pkt_seq}")
-                    # temp_part_index = identify_thread_num(pkt_seq, file_parts)
-                    temp_part_index = 0
+                    temp_part_index = identify_thread_num(pkt_seq, file_parts)
+                    # temp_part_index = 0
                     # print(f"++ Thread number: {temp_part_index}")
   
                     pkt = create_pkt(file_name, pkt_seq)
@@ -285,7 +284,9 @@ def sendFile(server):
                         
                 elif flag == "Continue":
                     pkt_seq = int(msg[1])
-                    temp_part_index = 0 # for debugging 
+                    # temp_part_index = 0 # for debugging 
+                    temp_part_index = identify_thread_num(pkt_seq, file_parts)
+                    
                     with shared_cv:
                         continue_sending[temp_part_index] = True
                         print(f"Continue sending from thread {temp_part_index} with client pkt {pkt_seq}")
@@ -364,21 +365,21 @@ def sendFile(server):
     send_threads = []
     
     num_parts = len(file_parts)
-    # for i in range(num_parts):
-    # # for k in range(1):
-    #     # i = 3
-    #     thread = threading.Thread(target=send_file_parts, args=(server, file_name, file_parts[i], i, buffers[i],client_data_addr[i]))
-    #     thread.start()
-    #     send_threads.append(thread)
+    for i in range(num_parts):
+    # for k in range(1):
+        # i = 3
+        thread = threading.Thread(target=send_file_parts, args=(server, file_name, file_parts[i], i, buffers[i],client_data_addr[i]))
+        thread.start()
+        send_threads.append(thread)
 
-    # for thread in send_threads:
-    #     thread.join()
-    start1 = file_parts[0][0]
-    end1 = file_parts[-1][1]
-    start_end = (start1, end1)
-    print(f"+++ start_end = {start_end}")
-    thread = threading.Thread(target=send_file_parts, args=(server, file_name, start_end,  0, buffers[0],client_data_addr[0]))
-    thread.start()  
+    for thread in send_threads:
+        thread.join()
+    # start1 = file_parts[0][0]
+    # end1 = file_parts[-1][1]
+    # start_end = (start1, end1)
+    # print(f"+++ start_end = {start_end}")
+    # thread = threading.Thread(target=send_file_parts, args=(server, file_name, start_end,  0, buffers[0],client_data_addr[0]))
+    # thread.start()  
     
     thread.join()
     print("===============All threads joined================")
