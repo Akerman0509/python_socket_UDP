@@ -1,10 +1,11 @@
 import socket
 import os
 import hashlib
-import sys
 import threading
 import time
 import random
+from pathlib import Path
+
 
 
 from dotenv import load_dotenv
@@ -206,36 +207,6 @@ def identify_thread_num(seq_num, file_parts):
     return -1
 
 def sendFile(server):
-    server_files = load_file_list()
-    
-    client_data_addr = []
-    client_addr = None
-    file_name = ""
-    address = None
-    seq_max = 0
-    file_parts = []
-    send_completed = threading.Event()    
-
-    file_name, client_addr, seq_max, file_parts = start_process_func(server, server_files)
-    wnd_max = min(40, seq_max)
-    buffers = [[] for _ in range (len(file_parts))]
-    
-    
-    client_data_addr = find_addr(server, client_addr)
-    print (f"client_data_addr: {client_data_addr}") 
-    print("$$$ Start the process $$$ ")
-    
-    # Create data sockets
-    # buffer0 ,buffer1, buffer2, buffer3 = [], [], [], []
-    n_shift_arr = [0, 0, 0, 0]
-    continue_sending = [True, True, True, True]
-    stop_flags = [False, False, False, False]
-    curr_sent_arr = [0, 0, 0, 0]
-    
-    
-    shared_lock = threading.Lock()
-    shared_cv = threading.Condition(shared_lock)
-    
     # Receive thread
     def receiver():
         nonlocal file_name, address ,buffers, n_shift_arr, file_parts, send_completed, shared_cv, server,stop_flags,curr_sent_arr,continue_sending
@@ -298,7 +269,6 @@ def sendFile(server):
             except socket.timeout:
                 print("Timeout, waiting for new ACK/NACK")
                 continue
-    
     def send_file_parts(socket_data, file_name, start_end, part_index, wnd_buffer, address):
         LOSS_RATE = 0.1
         nonlocal wnd_max, server, shared_cv, n_shift_arr,stop_flags,curr_sent_arr,continue_sending
@@ -357,52 +327,80 @@ def sendFile(server):
             time.sleep(0.01)
         print(f"$$ Done sending part {part_index}")
         return
-            
-    # Start the receiver thread.
-    recv_thread = threading.Thread(target=receiver, daemon = True)
-    recv_thread.start()
-    #start sending parts
-    send_threads = []
     
-    num_parts = len(file_parts)
-    for i in range(num_parts):
-    # for k in range(1):
-        # i = 3
-        thread = threading.Thread(target=send_file_parts, args=(server, file_name, file_parts[i], i, buffers[i],client_data_addr[i]))
-        thread.start()
-        send_threads.append(thread)
+    server_files = load_file_list()
+    while True:
+        client_data_addr = []
+        client_addr = None
+        file_name = ""
+        address = None
+        seq_max = 0
+        file_parts = []
+        send_completed = threading.Event()    
 
-    for thread in send_threads:
-        thread.join()
-    # start1 = file_parts[0][0]
-    # end1 = file_parts[-1][1]
-    # start_end = (start1, end1)
-    # print(f"+++ start_end = {start_end}")
-    # thread = threading.Thread(target=send_file_parts, args=(server, file_name, start_end,  0, buffers[0],client_data_addr[0]))
-    # thread.start()  
-    
-    thread.join()
-    print("===============All threads joined================")
-    
-    send_completed.set()
-    recv_thread.join()
+        file_name, client_addr, seq_max, file_parts = start_process_func(server, server_files)
+        wnd_max = min(40, seq_max)
+        buffers = [[] for _ in range (len(file_parts))]
+        
+        
+        client_data_addr = find_addr(server, client_addr)
+        print (f"client_data_addr: {client_data_addr}") 
+        print("$$$ Start the process $$$ ")
+        
+        # Create data sockets
+        # buffer0 ,buffer1, buffer2, buffer3 = [], [], [], []
+        n_shift_arr = [0, 0, 0, 0]
+        continue_sending = [True, True, True, True]
+        stop_flags = [False, False, False, False]
+        curr_sent_arr = [0, 0, 0, 0]
+        
+        
+        shared_lock = threading.Lock()
+        shared_cv = threading.Condition(shared_lock)
+        # Start the receiver thread.
+        recv_thread = threading.Thread(target=receiver, daemon = True)
+        recv_thread.start()
+        #start sending parts
+        send_threads = []
+        
+        num_parts = len(file_parts)
+        for i in range(num_parts):
+        # for k in range(1):
+            # i = 3
+            thread = threading.Thread(target=send_file_parts, args=(server, file_name, file_parts[i], i, buffers[i],client_data_addr[i]))
+            thread.start()
+            send_threads.append(thread)
 
-    print(f"==> Sending file {file_name} completed!")
+        for thread in send_threads:
+            thread.join()
+        
+        
+        # start1 = file_parts[0][0]
+        # end1 = file_parts[-1][1]
+        # start_end = (start1, end1)
+        # print(f"+++ start_end = {start_end}")
+        # thread = threading.Thread(target=send_file_parts, args=(server, file_name, start_end,  0, buffers[0],client_data_addr[0]))
+        # thread.start()  
+        
+        # thread.join()
+        print("===============All threads joined================")
+        
+        send_completed.set()
+        recv_thread.join()
+
+        print(f"==> Sending file {file_name} completed!")
+        
+        
     return 1
 
 
-def load_file_list():
-    FILE_LIST_PATH = "allowFile.txt"
-    files = {}
-    if not os.path.exists(FILE_LIST_PATH): 
-        print("File list not found!")
-        return files
 
-    with open(FILE_LIST_PATH, "r") as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) == 2:
-                files[parts[0]] = parts[1]  
+def load_file_list():
+    FILE_LIST_PATH = Path("serverFiles/")
+    if not FILE_LIST_PATH.exists():
+        return []
+    files = [f.name for f in FILE_LIST_PATH.iterdir() if f.is_file()]
+    print(f"Files in server directory: {files}")
     return files
 
         
