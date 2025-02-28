@@ -317,8 +317,8 @@ def sendFile(server):
                     if sending_seq > curr_sent_arr[part_index]:
                         pkt = create_pkt(file_name, sending_seq)
                         debug_log(f"Sending chunk after thread {part_index}: {sending_seq}")
-                        if random.random() > LOSS_RATE: # Simulate packet loss
-                            socket_data.sendto(pkt, address)
+                        #if random.random() > LOSS_RATE: # Simulate packet loss
+                        socket_data.sendto(pkt, address)
                         curr_sent_arr[part_index] = sending_seq
                     else: 
                         continue
@@ -411,7 +411,7 @@ def load_file_list():
 
         
 def server_side():
-    HOST_IP = "127.0.0.1"
+    HOST_IP = "192.168.1.6"
     MAIN_PORT = 3000
 
     # Create a socket using IPv4 and UDP

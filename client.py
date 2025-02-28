@@ -185,7 +185,7 @@ def update_line(file_name, part_index, start, end, curr_sent):
         percent = 100
     else:
         percent = (curr_sent - start) * 100 / tmp
-    percent = math.ceil(percent)
+    percent = min(100, math.ceil(percent))
     new_content = f"=> Downloading {file_name} part {part_index + 1} .... {percent}%"
 
     # Move cursor to the correct line
@@ -442,7 +442,7 @@ def client_side():
     
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     client.settimeout(1)
-    client.connect(("127.0.0.1",MAIN_PORT))
+    client.connect(("192.168.1.6",MAIN_PORT))
     #print(f"main socket on {client.getsockname()}")
     
     server_files = request_file_list(client)
@@ -501,7 +501,7 @@ def client_side():
 
     
 MAIN_PORT = 3000
-HOST_IP = "127.0.0.1"
+HOST_IP = "192.168.1.6"
 server_addr = (HOST_IP, MAIN_PORT)  
 
 BUFFER_SIZE = 1200
