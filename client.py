@@ -185,7 +185,7 @@ def update_line(file_name, part_index, start, end, curr_sent):
         percent = 100
     else:
         percent = (curr_sent - start) * 100 / tmp
-    percent = math.ceil(percent)
+    percent = min(100, math.ceil(percent))
     new_content = f"=> Downloading {file_name} part {part_index + 1} .... {percent}%"
 
     # Move cursor to the correct line
